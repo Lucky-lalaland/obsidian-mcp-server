@@ -191,7 +191,7 @@ server.tool(
   {
     path: z.string().describe("文件路徑"),
     content: z.string().describe("要追加的內容"),
-    message: z.string().describe("提交說明").default("veran was here")
+    message: z.string().optional().describe("提交說明").default("veran was here")
   },
   async ({ path, content, message }) => {
     const filePath = path.split("/").map(p => encodeURIComponent(p)).join("/");
