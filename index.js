@@ -32,7 +32,7 @@ server.tool(
   { path: z.string().describe("文件路徑，例如 日記/2026-03-07.md") },
   async ({ path }) => {
     const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/${path.split("/").map(p => encodeURIComponent(p)).join("/")}`,
       { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
     );
     const data = await res.json();
@@ -79,7 +79,7 @@ server.tool(
     let sha;
     try {
       const check = await fetch(
-        `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+        `https://api.github.com/repos/${GITHUB_REPO}/contents/${path.split("/").map(p => encodeURIComponent(p)).join("/")}`,
         { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
       );
       if (check.ok) {
@@ -95,7 +95,7 @@ server.tool(
     if (sha) body.sha = sha;
 
     const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/${path.split("/").map(p => encodeURIComponent(p)).join("/")}`,
       {
         method: "PUT",
         headers: {
@@ -123,7 +123,7 @@ server.tool(
   { path: z.string().describe("文件路徑") },
   async ({ path }) => {
     const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/${path.split("/").map(p => encodeURIComponent(p)).join("/")}`,
       { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
     );
     const data = await res.json();
@@ -148,7 +148,7 @@ server.tool(
   },
   async ({ path, heading }) => {
     const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`,
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/${path.split("/").map(p => encodeURIComponent(p)).join("/")}`,
       { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
     );
     const data = await res.json();
@@ -181,6 +181,62 @@ server.tool(
     }
     
     return { content: [{ type: "text", text: result.length ? result.join("\n") : "找不到包含「" + heading + "」的段落" }] };
+  }
+);
+
+// 工具: 追加內容到筆記末尾
+server.tool(
+  "append_note",
+  "在一篇筆記的末尾追加內容，不需要讀取原文",
+  {
+    path: z.string().describe("文件路徑"),
+    content: z.string().describe("要追加的內容"),
+    message: z.string().describe("提交說明").default("veran was here")
+  },
+  async ({ path, content, message }) => {
+    const filePath = path.split("/").map(p => encodeURIComponent(p)).join("/");
+    
+    // 服務端拉現有內容（不經過Claude，不耗token）
+    const res = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/${filePath}`,
+      { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
+    );
+    
+    let existing = "";
+    let sha;
+    
+    if (res.ok) {
+      const data = await res.json();
+      existing = Buffer.from(data.content, "base64").toString("utf-8");
+      sha = data.sha;
+    }
+    
+    const newContent = existing + "\n\n" + content;
+    const body = {
+      message: message || "veran was here",
+      content: Buffer.from(newContent, "utf-8").toString("base64"),
+    };
+    if (sha) body.sha = sha;
+    
+    const putRes = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/${filePath}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      }
+    );
+    
+    if (putRes.ok) {
+      return { content: [{ type: "text", text: `已追加到：${path}` }] };
+    } else {
+      const err = await putRes.json();
+      return { content: [{ type: "text", text: `追加失敗：${JSON.stringify(err)}` }] };
+    }
   }
 );
 
