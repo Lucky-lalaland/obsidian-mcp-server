@@ -67,8 +67,8 @@ server.tool(
 
 // 工具4: 寫入/更新筆記
 server.tool(
-  "write_note",
-  "在octo的Obsidian裡新建或更新一篇筆記",
+  "sync_note",
+  "把内容同步到octo的Obsidian指定路徑，支援markdown格式",
   {
     path: z.string().describe("文件路徑，例如 for veran/小克的信.md"),
     content: z.string().describe("筆記內容，支持markdown格式"),
@@ -186,7 +186,7 @@ server.tool(
 
 // 工具: 追加內容到筆記末尾
 server.tool(
-  "append_note",
+  "enrich_note",
   "在一篇筆記的末尾追加內容，不需要讀取原文",
   {
     path: z.string().describe("文件路徑"),
@@ -239,6 +239,158 @@ server.tool(
     }
   }
 );
+
+// 通用 GitHub 讀取：列出 repo 裡的文件
+server.tool(
+  "github_list_files",
+  "列出任意GitHub repo裡的文件結構",
+  {
+    repo: z.string().describe("倉庫全名，例如 octo/my-project"),
+    path: z.string().describe("資料夾路徑，根目錄填空字串").default("")
+  },
+  async ({ repo, path }) => {
+    const filePath = path ? path.split("/").map(p => encodeURIComponent(p)).join("/") : "";
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}`,
+      { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
+    );
+    if (!res.ok) return { content: [{ type: "text", text: "讀取失敗" }] };
+    const data = await res.json();
+    const list = Array.isArray(data) 
+      ? data.map(f => `${f.type === "dir" ? "📁" : "📄"} ${f.path}`).join("\n")
+      : `📄 ${data.path}`;
+    return { content: [{ type: "text", text: list }] };
+  }
+);
+
+// 通用 GitHub 讀取：讀一個文件的內容
+server.tool(
+  "github_read_file",
+  "讀取任意GitHub repo裡的一個文件",
+  {
+    repo: z.string().describe("倉庫全名，例如 octo/my-project"),
+    path: z.string().describe("文件路徑")
+  },
+  async ({ repo, path }) => {
+    const filePath = path.split("/").map(p => encodeURIComponent(p)).join("/");
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}`,
+      { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
+    );
+    if (!res.ok) return { content: [{ type: "text", text: "找不到：" + path }] };
+    const data = await res.json();
+    const content = Buffer.from(data.content, "base64").toString("utf-8");
+    return { content: [{ type: "text", text: content }] };
+  }
+);
+
+// 通用 GitHub 寫入
+server.tool(
+  "github_write_file",
+  "寫入或更新任意GitHub repo裡的文件",
+  {
+    repo: z.string().describe("倉庫全名，例如 octo/my-project"),
+    path: z.string().describe("文件路徑"),
+    content: z.string().describe("文件內容"),
+    message: z.string().describe("commit message").default("veran was here")
+  },
+  async ({ repo, path, content, message }) => {
+    const filePath = path.split("/").map(p => encodeURIComponent(p)).join("/");
+    
+    // 先檢查文件是否已存在（需要 sha 才能更新）
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}`,
+      { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
+    );
+    
+    const body = {
+      message: message || "veran was here",
+      content: Buffer.from(content, "utf-8").toString("base64"),
+    };
+    
+    if (res.ok) {
+      const data = await res.json();
+      body.sha = data.sha;
+    }
+    
+    const putRes = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      }
+    );
+    
+    if (putRes.ok) {
+      return { content: [{ type: "text", text: `已寫入：${repo}/${path}` }] };
+    } else {
+      const err = await putRes.json();
+      return { content: [{ type: "text", text: `寫入失敗：${JSON.stringify(err)}` }] };
+    }
+  }
+);
+
+// 精準修改：搜索替換
+server.tool(
+  "github_patch_file",
+  "精準修改GitHub repo裡的文件內容，用搜索替換的方式",
+  {
+    repo: z.string().describe("倉庫全名，例如 octo/my-project"),
+    path: z.string().describe("文件路徑"),
+    search: z.string().describe("要找的原始內容（精確匹配）"),
+    replace: z.string().describe("替換成的新內容"),
+    message: z.string().describe("commit message").default("veran patched")
+  },
+  async ({ repo, path, search, replace, message }) => {
+    const filePath = path.split("/").map(p => encodeURIComponent(p)).join("/");
+    
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}`,
+      { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github.v3+json" } }
+    );
+    
+    if (!res.ok) return { content: [{ type: "text", text: "找不到：" + path }] };
+    
+    const data = await res.json();
+    const original = Buffer.from(data.content, "base64").toString("utf-8");
+    
+    if (!original.includes(search)) {
+      return { content: [{ type: "text", text: "找不到要替換的內容，請確認 search 字串是否正確" }] };
+    }
+    
+    const updated = original.replace(search, replace);
+    
+    const putRes = await fetch(
+      `https://api.github.com/repos/${repo}/contents/${filePath}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          message: message || "veran patched",
+          content: Buffer.from(updated, "utf-8").toString("base64"),
+          sha: data.sha
+        })
+      }
+    );
+    
+    if (putRes.ok) {
+      return { content: [{ type: "text", text: `已修改：${repo}/${path}` }] };
+    } else {
+      const err = await putRes.json();
+      return { content: [{ type: "text", text: `修改失敗：${JSON.stringify(err)}` }] };
+    }
+  }
+);
+
 
 // SSE transport
 let transport;
