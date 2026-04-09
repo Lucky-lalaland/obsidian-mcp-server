@@ -335,20 +335,21 @@ server.tool(
 server.tool(
   "http_request",
   "發送HTTP請求到任意URL，支持GET/POST/PUT/DELETE，可帶自定義headers和JSON body。用於調用外部API、瀏覽網頁等",
-  {
-    method: z.enum(["GET", "POST", "PUT", "DELETE"]).describe("HTTP方法"),
-    url: z.string().describe("完整的URL"),
-    headers: z.record(z.string()).optional().describe("自定義請求頭，例如 Authorization"),
-    body: z.any().optional().describe("請求體，POST/PUT時使用，會自動JSON序列化")
-  },
-  async ({ method, url, headers = {}, body }) => {
-    const options = {
-      method,
-      headers: { "Content-Type": "application/json", ...headers }
-    };
-    if (body && (method === "POST" || method === "PUT")) {
-      options.body = typeof body === "string" ? body : JSON.stringify(body);
-    }
+{
+  method: z.enum(["GET", "POST", "PUT", "DELETE"]).describe("HTTP方法"),
+  url: z.string().describe("完整的URL"),
+  headers: z.string().optional().describe("自定義請求頭，JSON格式字串，例如 {\"Authorization\":\"Bearer xxx\"}"),
+  body: z.string().optional().describe("請求體JSON字串，POST/PUT時使用")
+},
+async ({ method, url, headers: headersStr, body: bodyStr }) => {
+  const customHeaders = headersStr ? JSON.parse(headersStr) : {};
+  const options = {
+    method,
+    headers: { "Content-Type": "application/json", ...customHeaders }
+  };
+  if (bodyStr && (method === "POST" || method === "PUT")) {
+    options.body = bodyStr;
+  }
     try {
       const res = await fetch(url, options);
       const ct = res.headers.get("content-type") || "";
