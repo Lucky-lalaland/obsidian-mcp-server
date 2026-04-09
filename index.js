@@ -370,9 +370,9 @@ async ({ method, url, headers: headersStr, body: bodyStr }) => {
 // ═══ SSE transport ═══
 let transport;
 app.get("/sse", async (req, res) => {
-  if (transport) {
-    try { await server.close(); } catch (e) {}
-  }
+ if (transport) {
+    try { await transport.close(); } catch (e) {}
+}
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
 });
