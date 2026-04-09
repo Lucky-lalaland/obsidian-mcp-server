@@ -7,7 +7,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 
 const app = express();
-const server = new McpServer({ name: "obsidian-mcp", version: "1.1.0" });
+const server = new McpServer({ name: "obsidian-mcp", version: "1.2.0" });
 
 // ═══ 輔助函數 ═══
 function encodePath(p) {
@@ -241,7 +241,7 @@ server.tool(
   }
 );
 
-// ═══ 新增：省 token 的精準讀取工具 ═══
+// ═══ 省 token 的精準讀取工具 ═══
 
 server.tool(
   "github_read_lines",
@@ -261,7 +261,6 @@ server.tool(
     const text = Buffer.from(data.content, "base64").toString("utf-8");
     const lines = text.split("\n");
 
-    // 模式1：行號範圍
     if (start_line != null) {
       const s = Math.max(1, start_line) - 1;
       const e = end_line != null ? Math.min(lines.length, end_line) : Math.min(s + 50, lines.length);
@@ -270,7 +269,6 @@ server.tool(
       return ok(`[行 ${s+1}-${e}，共 ${lines.length} 行]\n\n${numbered.join("\n")}`);
     }
 
-    // 模式2：關鍵詞搜索
     if (search) {
       const lower = search.toLowerCase();
       const matches = [];
@@ -286,7 +284,6 @@ server.tool(
               matches.push({ line: j + 1, text: lines[j], isMatch: j === i });
             }
           }
-          // 加分隔線
           matches.push({ separator: true });
         }
       }
@@ -302,7 +299,6 @@ server.tool(
       return ok(`[搜索「${search}」在 ${path}，共 ${lines.length} 行]\n\n${output}`);
     }
 
-    // 既沒行號也沒搜索：返回文件概覽
     return ok(`${path}: ${lines.length} 行, ${text.length} 字元\n前10行預覽:\n${lines.slice(0, 10).map((l, i) => `${i+1}\t${l}`).join("\n")}\n...\n最後5行:\n${lines.slice(-5).map((l, i) => `${lines.length - 4 + i}\t${l}`).join("\n")}`);
   }
 );
@@ -320,7 +316,6 @@ server.tool(
     const data = await res.json();
     const text = Buffer.from(data.content, "base64").toString("utf-8");
     const lines = text.split("\n");
-    // 提取函數/組件名作為結構預覽
     const structure = lines
       .map((l, i) => ({ line: i + 1, text: l }))
       .filter(({ text }) => /^(function |const |let |var |class |\/\/ ═|\/\/ 工具|server\.tool|\.tool\()/.test(text.trim()))
@@ -335,21 +330,21 @@ server.tool(
 server.tool(
   "http_request",
   "發送HTTP請求到任意URL，支持GET/POST/PUT/DELETE，可帶自定義headers和JSON body。用於調用外部API、瀏覽網頁等",
-{
-  method: z.enum(["GET", "POST", "PUT", "DELETE"]).describe("HTTP方法"),
-  url: z.string().describe("完整的URL"),
-  headers: z.string().optional().describe("自定義請求頭，JSON格式字串，例如 {\"Authorization\":\"Bearer xxx\"}"),
-  body: z.string().optional().describe("請求體JSON字串，POST/PUT時使用")
-},
-async ({ method, url, headers: headersStr, body: bodyStr }) => {
-  const customHeaders = headersStr ? JSON.parse(headersStr) : {};
-  const options = {
-    method,
-    headers: { "Content-Type": "application/json", ...customHeaders }
-  };
-  if (bodyStr && (method === "POST" || method === "PUT")) {
-    options.body = bodyStr;
-  }
+  {
+    method: z.enum(["GET", "POST", "PUT", "DELETE"]).describe("HTTP方法"),
+    url: z.string().describe("完整的URL"),
+    headers: z.string().optional().describe("自定義請求頭，JSON格式字串，例如 {\"Authorization\":\"Bearer xxx\"}"),
+    body: z.string().optional().describe("請求體JSON字串，POST/PUT時使用")
+  },
+  async ({ method, url, headers: headersStr, body: bodyStr }) => {
+    const customHeaders = headersStr ? JSON.parse(headersStr) : {};
+    const options = {
+      method,
+      headers: { "Content-Type": "application/json", ...customHeaders }
+    };
+    if (bodyStr && (method === "POST" || method === "PUT")) {
+      options.body = bodyStr;
+    }
     try {
       const res = await fetch(url, options);
       const ct = res.headers.get("content-type") || "";
@@ -370,9 +365,6 @@ async ({ method, url, headers: headersStr, body: bodyStr }) => {
 // ═══ SSE transport ═══
 let transport;
 app.get("/sse", async (req, res) => {
- if (transport) {
-    try { await transport.close(); } catch (e) {}
-}
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
 });
@@ -381,4 +373,4 @@ app.post("/messages", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Obsidian MCP server v1.1.0 running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Obsidian MCP server v1.2.0 running on port ${PORT}`));
